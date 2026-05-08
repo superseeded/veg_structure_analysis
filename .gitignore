@@ -40,3 +40,4 @@ vignettes/*.pdf
 
 # Local working folder
 /working/*
+.positai

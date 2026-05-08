@@ -685,7 +685,7 @@ create_score_sheet <- function(analysis_results,
                            p_cov, p_phen, p_con,
                            nrow = 3, ncol = 3)
     ggsave(paste0(path_directory, "scoresheet.pdf"), plot = p_grid,
-           height = 24, width = 24, units = "cm")
+           height = 20, width = 20, units = "cm", device = cairo_pdf)
     # pdf(paste0(path_directory, "scoresheet.pdf"), height = 4, width = 4, pointsize = 4)
     
   }
@@ -1169,7 +1169,7 @@ plot_circ_bar <- function(analysis_results,
   
   # Limits of the plot. The negative value controls the size of the inner circle, the positive one is useful to add size over each bar
   if(!stacked & variable_name != "coverage") p <- p + ylim(-max(data$value) * 1.1, max(data$value) * 1.5)
-  if(!stacked & variable_name == "coverage") p <- p + ylim(-1.1, 1.15)
+  if(!stacked & variable_name == "coverage") p <- p + ylim(-1.1, 1.2)
   if(stacked) p <- p + ylim(-max_value * 1.1, max_value * 1.3)
   
   # Custom the theme: no axis title and no cartesian grid
@@ -1193,7 +1193,7 @@ plot_circ_bar <- function(analysis_results,
                                          yy = -max(data$value),
                                          label = paste0(score, "/100\nRICHNESS\nSCORE\n(", length(data$value), " SPECIES)")),
                        mapping = aes(xx, yy, label = label),
-                       size = 3,
+                       size = 4,
                        inherit.aes = FALSE,
                        lineheight = 0.9)
   }
@@ -1210,7 +1210,7 @@ plot_circ_bar <- function(analysis_results,
                                   yy = -max(data$value),
                                   label = paste0(score, "/100\nPHENOLOGY\nSCORE")),
                 mapping = aes(xx, yy, label = label),
-                size = 3,
+                size = 4,
                 inherit.aes = FALSE,
                 lineheight = 0.9)
     
@@ -1235,7 +1235,7 @@ plot_circ_bar <- function(analysis_results,
                                   yy = -1.1,
                                   label = paste0(score, "/100\nCOVERAGE\nSCORE")),
                 mapping = aes(xx, yy, label = label),
-                size = 3,
+                size = 4,
                 inherit.aes = FALSE,
                 lineheight = 0.9)
     
@@ -1259,7 +1259,7 @@ plot_circ_bar <- function(analysis_results,
                                   yy = -max_value * 1.1,
                                   label = paste0(score, "/100\nCONNECTIVITY\nSCORE")),
                 mapping = aes(xx, yy, label = label),
-                size = 3,
+                size = 4,
                 inherit.aes = FALSE,
                 lineheight = 0.9)
   }
@@ -1316,7 +1316,7 @@ plot_classes <- function(analysis_results,
                                 yy = 0,
                                 label = paste0(score, "/100\n", toupper(variable_name), "\nSCORE")),
               mapping = aes(xx, yy, label = label),
-              size = 3,
+              size = 4,
               inherit.aes = FALSE,
               lineheight = 0.9)
   
@@ -1365,7 +1365,7 @@ plot_percent <- function(analysis_results,
                                 yy = -max(data$values) * 0.5,
                                 label = label_text),
               mapping = aes(xx, yy, label = label),
-              size = 3,
+              size = 4,
               inherit.aes = FALSE,
               lineheight = 0.9)
 }
