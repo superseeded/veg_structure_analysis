@@ -12,7 +12,8 @@ library(spatstat)
 library(echarts4r)
 
 # Analyse spatial data and create output for visualisations
-analyse_spatial_data <- function(spatial_points, spatial_list) {
+analyse_spatial_data <- function(spatial_points, spatial_list, threshold = 0.3) {
+  validate_connectivity_threshold(threshold)
   
   years <- names(spatial_list)
   n_years <- length(spatial_list)
@@ -52,37 +53,31 @@ analyse_spatial_data <- function(spatial_points, spatial_list) {
     category = toupper(unique(spatial_points[ , "density"])),
     values = sapply(unique(spatial_points[ , "density"]), function(var) length(which(spatial_points[ , "density"] == var)))
   )
-  density_score <- shannon_evenness(density_data$values) * (length(unique(density_data$values)) / 3)
+  density_score <- shannon_evenness(density_data$values) * (sum(density_data$values > 0) / 3)
   density_score <- base::round(density_score * 100)
   
   size_data <- data.frame(
     category = c("0-0.75m", "0.75-1.5m", "1.5-3m", "+3m"),
     values = apply(height_ranges, 1, function(hts) length(which(spatial_points$max_height > hts[1] & spatial_points$max_height <= hts[2])))
   )
-  size_score <- shannon_evenness(size_data$values) * (length(unique(size_data$values)) / 4)
+  size_score <- shannon_evenness(size_data$values) * (sum(size_data$values > 0) / 4)
   size_score <- base::round(size_score * 100)
   
   texture_data <- data.frame(
     category = toupper(unique(spatial_points[ , "texture"])),
     values = sapply(unique(spatial_points[ , "texture"]), function(var) length(which(spatial_points[ , "texture"] == var)))
   )
-  texture_score <- shannon_evenness(texture_data$values) * (length(unique(texture_data$values)) / 3)
+  texture_score <- shannon_evenness(texture_data$values) * (sum(texture_data$values > 0) / 3)
   texture_score <- base::round(texture_score * 100)
   
-  props <- table(spatial_points[ , "endemism"])
-  
-  if(length(props) == 1 && names(props) %in% "native") {
-    props <- c(0, props)
-  }
-  
-  zero_prop <- base::round((props[1] / sum(props)) * 100)
-  one_prop <- base::round((props[2] / sum(props)) * 100)
-  
+  # Use explicit status labels: table order and the presence of both classes
+  # must not determine which plants are considered native.
+  one_prop <- base::round(native_proportion(spatial_points$endemism) * 100)
   endemism_data <- data.frame(
-    category = 1:100,
-    values = c(rep(0, zero_prop), rep(1, one_prop))
+    category = seq_len(100),
+    values = c(rep(0, 100 - one_prop), rep(1, one_prop))
   )
-  endemism_score <- base::round(one_prop, digits = 0)
+  endemism_score <- one_prop
   
   species <- sub("(\\w+\\s+\\w+).*", "\\1", spatial_points$species)
   
@@ -128,14 +123,16 @@ analyse_spatial_data <- function(spatial_points, spatial_list) {
       grid$prop_ol[is.na(grid$prop_ol)] <- 0
       
       # Based on threshold value
-      grid$prop_ol <- ifelse(grid$prop_ol > 0.3, 1, 0)
+      grid$prop_ol <- ifelse(grid$prop_ol > threshold, 1, 0)
       
       # # Based on Bernoulli probabilities
       # grid$prop_ol <- base::round(grid$prop_ol, 3)
       # grid$prop_ol <- rbinom(n = length(grid$prop_ol), size = 1, prob = grid$prop_ol)
       
       mean(sapply(idx, function(p) {
-        sum(grid$prop_ol[nb_list[[p]]]) / length(nb_list[[p]])
+        neighbours <- nb_list[[p]]
+        if (length(neighbours) == 0) return(0)
+        mean(grid$prop_ol[neighbours])
       }))
       
     })
@@ -184,7 +181,7 @@ check_spatial_input <- function(point_locations, polygon_locations = NULL) {
   
   if(!is.null(polygon_locations)) {
     polygon_data <-as.data.frame(st_drop_geometry(polygon_locations))
-    if(!identical(sort(names(point_data)), correct_names)) stop("Check column names in polygon data; they are not as required")  }
+    if(!identical(sort(names(polygon_data)), correct_names)) stop("Check column names in polygon data; they are not as required")  }
   
   NULL 
 }
@@ -523,8 +520,8 @@ create_score_sheet <- function(analysis_results,
   }
   
   print("Calculating total score.")
-  score_names <- ls(pattern = "_score$", envir = .GlobalEnv)
-  total_score <- base::round(mean(sapply(score_names, function(x) as.numeric(get(x)))))
+  # Calculate only this assessment's eight metrics; never read session globals.
+  total_score <- base::round(mean(scorecard_scores(analysis_results)))
   p_tot <- dial_plot(value = total_score)
   if(web_based & make_plot == TRUE) {
     png(paste0(path_directory, "total.png"), height = 400, width = 400, pointsize = 4, res = 150)
@@ -830,6 +827,7 @@ dial_plot <- function(label = "", value = 50, dial.radius = 1,
 # Estimate how well the site vegetation is connected using a threshold value
 # for proportion of vegetation coverage in each cell
 estimate_connectivity <- function(spatial_list, threshold = 0.3) {
+  validate_connectivity_threshold(threshold)
   # Extract unique years from file list
   years <- names(spatial_list)
   n_years <- length(years)
@@ -879,7 +877,9 @@ estimate_connectivity <- function(spatial_list, threshold = 0.3) {
       # grid$prop_ol <- rbinom(n = length(grid$prop_ol), size = 1, prob = grid$prop_ol)
       
       mean(sapply(idx, function(p) {
-        sum(grid$prop_ol[nb_list[[p]]]) / length(nb_list[[p]])
+        neighbours <- nb_list[[p]]
+        if (length(neighbours) == 0) return(0)
+        mean(grid$prop_ol[neighbours])
       }))
       
     })
@@ -1000,7 +1000,7 @@ process_structure <- function(point_locations, # Spatial geometry and attributes
     plant_widths <- point_locations$max_width * (pmin(year + plant_ages, point_locations$year_max) / point_locations$year_max)
     
     # Generate id lists for plants that intersect each height datum for the given year
-    plant_idx <- lapply(cut_heights, function(cut_height) which(plant_heights + point_locations$ref_height >= cut_height & cut_height >= point_locations$ref_height))
+    plant_idx <- lapply(cut_heights, function(cut_height) which(plant_heights > 0 & plant_heights + point_locations$ref_height >= cut_height & cut_height >= point_locations$ref_height))
     
     proportion_grids <- lapply(cut_heights, function(cut_height) {
       
@@ -1113,14 +1113,12 @@ plot_circ_bar <- function(analysis_results,
   if(variable_name == "richness") {
     data <- analysis_results[[1]][[5]]
     score <- analysis_results[[1]][[13]]
-    assign("richness_score", score, envir = .GlobalEnv)
     
   }
   
   if(variable_name == "phenology") {
     data <- analysis_results[[1]][[6]]
     score <- analysis_results[[1]][[14]]
-    assign("phenology_score", score, envir = .GlobalEnv)
     
     img <- readPNG("data/images/flower_icon.png")
     g <- rasterGrob(img, interpolate = TRUE)
@@ -1131,8 +1129,7 @@ plot_circ_bar <- function(analysis_results,
       id = factor(seq_len(n_years)),
       value = sapply(seq_len(n_years), function(i) analysis_results[[i]][[7]]),
       max = 1)
-    score <- base::round(mean(sapply(n_years, function(i) analysis_results[[i]][[15]])))
-    assign("coverage_score", score, envir = .GlobalEnv)
+    score <- base::round(period_metric_score(analysis_results, "coverage"))
   }
   
   if(variable_name == "connectivity" ) {
@@ -1142,8 +1139,7 @@ plot_circ_bar <- function(analysis_results,
     
     max_value <- ncol(data_w)
     
-    score <- base::round(mean(sapply(n_years, function(i) analysis_results[[i]][[16]])))
-    assign("connectivity_score", score, envir = .GlobalEnv)
+    score <- base::round(period_metric_score(analysis_results, "connectivity"))
     
     data_w$remainder <- apply(data_w, 1, function(x) ncol(data_w) - sum(x))
     
@@ -1285,7 +1281,6 @@ plot_classes <- function(analysis_results,
     score <- analysis_results[[1]][[11]]
     data <- analysis_results[[1]][[3]]
   }
-  assign(paste0(variable_name, "_score"), score, envir = .GlobalEnv)
   
   # Compute percentages
   data$fraction = data$values / sum(data$values)
@@ -1344,7 +1339,6 @@ plot_percent <- function(analysis_results,
   pr_palette <- c(rep(colour, one_prop),  rep("#e8e8e8", (100 - one_prop)))
   
   score <- analysis_results[[1]][[12]]
-  assign(paste0(variable_name, "_score"), score, envir = .GlobalEnv)
   
   label_text <- paste0(score, "/100\n", label, "\nSCORE")
   
@@ -1438,14 +1432,55 @@ rotate_data <- function(data, x_add = 0, y_add = 0) {
 }
 
 
-# Calculate the overall Shannon Diversity Evenness Index
+# Evenness among represented categories. Category/month completeness is scored
+# separately by the caller. Keep full precision until the displayed score.
 shannon_evenness <- function(counts) {
+  if (!is.numeric(counts) || any(!is.finite(counts)) || any(counts < 0)) {
+    stop("Counts must be finite, nonnegative numbers.")
+  }
+  counts <- counts[counts > 0]
+  if (length(counts) < 2) return(0)
   sp_props <- counts / sum(counts)
-  sdi <- -sum(sp_props * log(sp_props))
-  max_sdi <- log(length(counts)) 
-  score <- signif(sdi / max_sdi, 2)
-  if(is.nan(score)) score <- 0
-  score
+  pmin(1, pmax(0, -sum(sp_props * log(sp_props)) / log(length(counts))))
+}
+
+native_proportion <- function(status) {
+  status <- tolower(trimws(as.character(status)))
+  introduced <- c("exotic", "introduced", "non-native", "non native", "alien",
+                  "naturalized", "naturalised")
+  native <- c("native", "indigenous", "endemic")
+  if (length(status) == 0 || anyNA(status) ||
+      any(!status %in% c(native, introduced))) {
+    stop("Supply a known native or introduced status for every plant.")
+  }
+  mean(status %in% native)
+}
+
+validate_connectivity_threshold <- function(threshold) {
+  if (!is.numeric(threshold) || length(threshold) != 1 ||
+      !is.finite(threshold) || threshold < 0 || threshold > 1) {
+    stop("Connectivity threshold must be a single number between zero and one.")
+  }
+  invisible(NULL)
+}
+
+# Use all years and the unrounded spatial proportions, not just the final year.
+period_metric_score <- function(analysis_results, variable_name) {
+  if (length(analysis_results) == 0) stop("Supply at least one assessment year.")
+  field <- switch(variable_name, coverage = "coverage_data",
+                  connectivity = "connectivity_data",
+                  stop("Expected coverage or connectivity."))
+  100 * mean(vapply(analysis_results, function(year) mean(year[[field]]), numeric(1)))
+}
+
+scorecard_scores <- function(analysis_results) {
+  if (length(analysis_results) == 0) stop("Supply at least one assessment year.")
+  fields <- c("density_score", "size_score", "texture_score", "endemism_score",
+              "richness_score", "phenology_score")
+  composition <- vapply(fields, function(field) analysis_results[[1]][[field]], numeric(1))
+  c(composition,
+    coverage_score = period_metric_score(analysis_results, "coverage"),
+    connectivity_score = period_metric_score(analysis_results, "connectivity"))
 }
 
 
@@ -1461,7 +1496,8 @@ columnar <- function(adj_cut_height = 0, plant_height = 0) {
 }
 
 mounding <- function(adj_cut_height = 0, plant_height = 0) {
-  sqrt(plant_height^2 - adj_cut_height^2)
+  ifelse(plant_height > 0 & adj_cut_height >= 0 & adj_cut_height <= plant_height,
+         sqrt(pmax(0, 1 - (adj_cut_height / plant_height)^2)), 0)
 }
 
 pyramidal <- function(adj_cut_height = 0, plant_height = 0) {
@@ -1477,7 +1513,7 @@ rounded <- function(adj_cut_height = 0, plant_height = 0) {
 }
 
 upright <- function(adj_cut_height = 0, plant_height = 0) {
-  adj_cut_height / adj_cut_height
+  as.numeric(plant_height > 0 & adj_cut_height >= 0 & adj_cut_height <= plant_height)
 }
 
 vase <- function(adj_cut_height = 0, plant_height = 0) {
